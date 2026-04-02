@@ -48,7 +48,17 @@ Po udanym buildzie gotowy plik znajdziesz tutaj:
 dist/transcriber.exe
 ```
 
-Uwaga: wynikowy `exe` nadal przy pierwszym użyciu może dociągać brakujące zależności runtime, na przykład model Whisper lub pakiety potrzebne w środowisku użytkownika.
+Skrypt builda przed pakowaniem sprawdza też, czy w środowisku są dostępne runtime zależności potrzebne do zbundlowania aplikacji, między innymi `openai-whisper` oraz `imageio-ffmpeg`. Jeśli ich brakuje, zaproponuje instalację.
+
+Uruchamianie `exe` jest takie samo jak skryptu `.py`, tylko zamiast `python transcribe.py` wywołujesz plik wykonywalny:
+
+```powershell
+./dist/transcriber.exe sciezka/do/pliku.mp3
+./dist/transcriber.exe sciezka/do/wideo.mp4 -o wynik.txt
+./dist/transcriber.exe sciezka/do/wideo.mp4 -l pl --keep-converted-audio
+```
+
+Uwaga: wynikowy `exe` nie powinien już próbować doinstalowywać modułów Pythona do własnego wnętrza. Te moduły mają być zbundlowane podczas builda. Przy pierwszym użyciu Whisper nadal może natomiast pobrać sam model, jeśli nie ma go jeszcze w cache użytkownika.
 
 ## Użycie
 

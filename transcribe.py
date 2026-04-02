@@ -6,7 +6,7 @@ Works on Windows, macOS and Linux.
 """
 
 import argparse
-import importlib.util
+import importlib
 import os
 import shutil
 import subprocess
@@ -21,6 +21,10 @@ PYTHON_DEPENDENCIES = {
 }
 
 VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov", ".mkv", ".avi", ".webm"}
+
+
+def is_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
 
 
 def format_time(seconds: float) -> str:
@@ -44,11 +48,19 @@ def ensure_python_modules(module_names: list[str], auto_confirm: bool) -> None:
     missing_packages: list[str] = []
 
     for module_name in module_names:
-        if importlib.util.find_spec(module_name) is None:
+        try:
+            importlib.import_module(module_name)
+        except ImportError:
             missing_packages.append(PYTHON_DEPENDENCIES[module_name])
 
     if not missing_packages:
         return
+
+    if is_frozen():
+        print("This EXE is missing bundled runtime modules:")
+        print(", ".join(missing_packages))
+        print("Rebuild the executable with build_exe.ps1 so these packages are bundled inside it.")
+        sys.exit(1)
 
     packages_display = ", ".join(missing_packages)
     if auto_confirm:
@@ -69,14 +81,33 @@ def ensure_python_modules(module_names: list[str], auto_confirm: bool) -> None:
 
 def install_python_packages(packages: list[str]) -> None:
     print(f"Installing Python packages: {', '.join(packages)}")
+    pip_command = resolve_pip_install_command()
     try:
         subprocess.run(
-            [sys.executable, "-m", "pip", "install", *packages],
+            [*pip_command, *packages],
             check=True,
         )
     except subprocess.CalledProcessError as exc:
         print(f"Failed to install dependencies: {exc}")
         sys.exit(exc.returncode or 1)
+
+
+def resolve_pip_install_command() -> list[str]:
+    if not is_frozen():
+        return [sys.executable, "-m", "pip", "install"]
+
+    if os.name == "nt":
+        py_launcher = shutil.which("py")
+        if py_launcher:
+            return [py_launcher, "-m", "pip", "install"]
+
+    python_binary = shutil.which("python")
+    if python_binary:
+        return [python_binary, "-m", "pip", "install"]
+
+    print("Could not find a Python interpreter for installing packages.")
+    print("Install Python and pip, or run the non-EXE version of the script.")
+    sys.exit(1)
 
 
 def ensure_ffmpeg(auto_confirm: bool) -> Path:
