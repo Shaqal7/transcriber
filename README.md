@@ -26,6 +26,7 @@ Jeśli nie zrobisz tego ręcznie, skrypt sam wykryje brakujące pakiety i może 
 Windows:
 
 ```powershell
+py -3.13 .\transcribe.py --gui
 py -3.13 .\transcribe.py .\plik.mp3
 py -3.13 .\transcribe.py .\plik.mp4 -o wynik.txt
 py -3.13 .\transcribe.py .\plik.mp4 --keep-converted-audio
@@ -34,9 +35,35 @@ py -3.13 .\transcribe.py .\plik.mp4 --keep-converted-audio
 macOS / Linux:
 
 ```bash
+python3 transcribe.py --gui
 python3 transcribe.py ./plik.mp3
 python3 transcribe.py ./plik.mp4 -o wynik.txt
 python3 transcribe.py ./plik.mp4 --keep-converted-audio
+```
+
+## Proste UI
+
+Skrypt ma też prosty interfejs okienkowy oparty o `tkinter`.
+Pozwala wybrać:
+
+- plik wejściowy
+- plik wynikowy
+- model Whisper
+- język
+- `--yes`
+- `--keep-converted-audio`
+- włączenie LLM oraz wszystkie powiązane opcje
+
+Uruchomienie UI:
+
+```powershell
+py -3.13 .\transcribe.py --gui
+```
+
+Możesz też po prostu uruchomić skrypt bez argumentów:
+
+```powershell
+py -3.13 .\transcribe.py
 ```
 
 Przykłady:
@@ -75,6 +102,7 @@ py -3.13 .\transcribe.py .\KSeF.mp4 -o wynik.txt --llm-provider codex --llm-mode
 | `--llm-model` | Model przekazywany do wybranego CLI | — |
 | `--llm-prompt-file` | Plik `.txt` z promptem/instrukcją do połączenia z transkrypcją | — |
 | `--llm-command-template` | Własny szablon komendy dla `codex` z placeholderami | — |
+| `--gui` | Uruchamia proste okno desktopowe do wyboru pliku i opcji | `False` |
 
 ## Jak działa skrypt
 

@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -361,11 +362,320 @@ def transcribe(
                 pass
 
 
+def build_transcribe_command(
+    input_path: str,
+    output_path: Optional[str],
+    model_name: str,
+    language: Optional[str],
+    auto_confirm: bool,
+    keep_converted_audio: bool,
+    llm_provider: Optional[str],
+    llm_model: Optional[str],
+    llm_prompt_file: Optional[str],
+    llm_command_template: Optional[str],
+) -> list[str]:
+    command = [sys.executable, str(Path(__file__).resolve()), input_path]
+
+    if output_path:
+        command.extend(["-o", output_path])
+    if model_name:
+        command.extend(["-m", model_name])
+    if language:
+        command.extend(["-l", language])
+    if auto_confirm:
+        command.append("--yes")
+    if keep_converted_audio:
+        command.append("--keep-converted-audio")
+    if llm_provider:
+        command.extend(["--llm-provider", llm_provider])
+    if llm_model:
+        command.extend(["--llm-model", llm_model])
+    if llm_prompt_file:
+        command.extend(["--llm-prompt-file", llm_prompt_file])
+    if llm_command_template:
+        command.extend(["--llm-command-template", llm_command_template])
+
+    return command
+
+
+def launch_gui() -> None:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, ttk
+
+    root = tk.Tk()
+    root.title("Transcriber")
+    root.geometry("860x760")
+    root.minsize(760, 640)
+
+    container = ttk.Frame(root, padding=16)
+    container.pack(fill="both", expand=True)
+    container.columnconfigure(1, weight=1)
+    container.rowconfigure(11, weight=1)
+
+    input_var = tk.StringVar()
+    output_var = tk.StringVar()
+    model_var = tk.StringVar(value="medium")
+    language_var = tk.StringVar()
+    auto_confirm_var = tk.BooleanVar(value=True)
+    keep_audio_var = tk.BooleanVar(value=False)
+    use_llm_var = tk.BooleanVar(value=False)
+    llm_provider_var = tk.StringVar(value="claude")
+    llm_model_var = tk.StringVar()
+    llm_prompt_var = tk.StringVar()
+    llm_template_var = tk.StringVar()
+    status_var = tk.StringVar(value="Gotowe")
+
+    process_state = {"running": False, "process": None}
+
+    def append_log(message: str) -> None:
+        log_text.configure(state="normal")
+        log_text.insert("end", message)
+        log_text.see("end")
+        log_text.configure(state="disabled")
+
+    def browse_input() -> None:
+        file_path = filedialog.askopenfilename(
+            title="Wybierz plik audio lub wideo",
+            filetypes=[
+                ("Audio/Video", "*.mp3 *.wav *.m4a *.flac *.ogg *.mp4 *.mov *.mkv *.avi *.webm *.m4v"),
+                ("Wszystkie pliki", "*.*"),
+            ],
+        )
+        if file_path:
+            input_var.set(file_path)
+            if not output_var.get():
+                output_var.set(str(Path(file_path).with_suffix(".txt")))
+
+    def browse_output() -> None:
+        file_path = filedialog.asksaveasfilename(
+            title="Zapisz transkrypcję jako",
+            defaultextension=".txt",
+            filetypes=[("Plik tekstowy", "*.txt"), ("Wszystkie pliki", "*.*")],
+        )
+        if file_path:
+            output_var.set(file_path)
+
+    def browse_prompt() -> None:
+        file_path = filedialog.askopenfilename(
+            title="Wybierz plik promptu",
+            filetypes=[("Plik tekstowy", "*.txt"), ("Wszystkie pliki", "*.*")],
+        )
+        if file_path:
+            llm_prompt_var.set(file_path)
+
+    def sync_llm_state(*_args: object) -> None:
+        enabled = use_llm_var.get()
+        provider_state = "readonly" if enabled else "disabled"
+        entry_state = "normal" if enabled else "disabled"
+        template_state = "normal" if enabled and llm_provider_var.get() == "codex" else "disabled"
+        prompt_button_state = "normal" if enabled else "disabled"
+
+        llm_provider_combo.configure(state=provider_state)
+        llm_model_entry.configure(state=entry_state)
+        llm_prompt_entry.configure(state=entry_state)
+        llm_prompt_button.configure(state=prompt_button_state)
+        llm_template_entry.configure(state=template_state)
+
+    def set_controls_enabled(enabled: bool) -> None:
+        base_state = "normal" if enabled else "disabled"
+        readonly_state = "readonly" if enabled else "disabled"
+
+        input_entry.configure(state=base_state)
+        input_button.configure(state=base_state)
+        output_entry.configure(state=base_state)
+        output_button.configure(state=base_state)
+        model_combo.configure(state=readonly_state)
+        language_entry.configure(state=base_state)
+        auto_confirm_check.configure(state=base_state)
+        keep_audio_check.configure(state=base_state)
+        use_llm_check.configure(state=base_state)
+        start_button.configure(state=base_state)
+        sync_llm_state()
+
+    def run_command(command: list[str]) -> None:
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+        except OSError as exc:
+            root.after(
+                0,
+                lambda: (
+                    append_log(f"Nie udało się uruchomić procesu: {exc}\n"),
+                    status_var.set("Błąd uruchomienia"),
+                    set_controls_enabled(True),
+                    process_state.update({"running": False, "process": None}),
+                ),
+            )
+            return
+
+        process_state["process"] = process
+
+        if process.stdout is not None:
+            for line in process.stdout:
+                root.after(0, lambda current_line=line: append_log(current_line))
+
+        return_code = process.wait()
+
+        def finish() -> None:
+            process_state["running"] = False
+            process_state["process"] = None
+            set_controls_enabled(True)
+            if return_code == 0:
+                status_var.set("Zakończono pomyślnie")
+                messagebox.showinfo("Transcriber", "Transkrypcja zakończona.")
+            else:
+                status_var.set(f"Błąd procesu ({return_code})")
+                messagebox.showerror("Transcriber", f"Proces zakończył się błędem: {return_code}")
+
+        root.after(0, finish)
+
+    def start_transcription() -> None:
+        if process_state["running"]:
+            return
+
+        input_path = input_var.get().strip()
+        if not input_path:
+            messagebox.showerror("Transcriber", "Wybierz plik wejściowy.")
+            return
+
+        if use_llm_var.get() and not llm_prompt_var.get().strip():
+            messagebox.showerror("Transcriber", "Dla trybu LLM wskaż plik promptu.")
+            return
+
+        if use_llm_var.get() and llm_provider_var.get() == "codex" and not llm_template_var.get().strip():
+            messagebox.showerror("Transcriber", "Dla providera 'codex' podaj szablon komendy.")
+            return
+
+        command = build_transcribe_command(
+            input_path=input_path,
+            output_path=output_var.get().strip() or None,
+            model_name=model_var.get().strip() or "medium",
+            language=language_var.get().strip() or None,
+            auto_confirm=auto_confirm_var.get(),
+            keep_converted_audio=keep_audio_var.get(),
+            llm_provider=llm_provider_var.get() if use_llm_var.get() else None,
+            llm_model=llm_model_var.get().strip() or None,
+            llm_prompt_file=llm_prompt_var.get().strip() or None,
+            llm_command_template=llm_template_var.get().strip() or None,
+        )
+
+        log_text.configure(state="normal")
+        log_text.delete("1.0", "end")
+        log_text.configure(state="disabled")
+        append_log("$ " + subprocess.list2cmdline(command) + "\n\n")
+
+        process_state["running"] = True
+        status_var.set("Trwa przetwarzanie...")
+        set_controls_enabled(False)
+
+        worker = threading.Thread(target=run_command, args=(command,), daemon=True)
+        worker.start()
+
+    ttk.Label(container, text="Plik wejściowy").grid(row=0, column=0, sticky="w", pady=(0, 6))
+    input_entry = ttk.Entry(container, textvariable=input_var)
+    input_entry.grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=(0, 6))
+    input_button = ttk.Button(container, text="Wybierz...", command=browse_input)
+    input_button.grid(row=0, column=2, sticky="ew", pady=(0, 6))
+
+    ttk.Label(container, text="Plik wynikowy").grid(row=1, column=0, sticky="w", pady=(0, 6))
+    output_entry = ttk.Entry(container, textvariable=output_var)
+    output_entry.grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=(0, 6))
+    output_button = ttk.Button(container, text="Zapisz jako...", command=browse_output)
+    output_button.grid(row=1, column=2, sticky="ew", pady=(0, 6))
+
+    ttk.Label(container, text="Model Whisper").grid(row=2, column=0, sticky="w", pady=(0, 6))
+    model_combo = ttk.Combobox(
+        container,
+        textvariable=model_var,
+        values=["tiny", "base", "small", "medium", "large"],
+        state="readonly",
+    )
+    model_combo.grid(row=2, column=1, sticky="w", pady=(0, 6))
+
+    ttk.Label(container, text="Język").grid(row=3, column=0, sticky="w", pady=(0, 6))
+    language_entry = ttk.Entry(container, textvariable=language_var)
+    language_entry.grid(row=3, column=1, sticky="ew", padx=(0, 8), pady=(0, 6))
+
+    auto_confirm_check = ttk.Checkbutton(
+        container,
+        text="Automatycznie zgadzaj się na instalację brakujących pakietów",
+        variable=auto_confirm_var,
+    )
+    auto_confirm_check.grid(row=4, column=0, columnspan=3, sticky="w", pady=(4, 2))
+
+    keep_audio_check = ttk.Checkbutton(
+        container,
+        text="Zachowaj wygenerowany plik MP3 obok źródłowego wideo",
+        variable=keep_audio_var,
+    )
+    keep_audio_check.grid(row=5, column=0, columnspan=3, sticky="w", pady=(2, 10))
+
+    llm_frame = ttk.LabelFrame(container, text="Opcjonalne użycie LLM", padding=12)
+    llm_frame.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(0, 12))
+    llm_frame.columnconfigure(1, weight=1)
+
+    use_llm_check = ttk.Checkbutton(
+        llm_frame,
+        text="Po transkrypcji uruchom CLI LLM",
+        variable=use_llm_var,
+        command=sync_llm_state,
+    )
+    use_llm_check.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+
+    ttk.Label(llm_frame, text="Provider").grid(row=1, column=0, sticky="w", pady=4)
+    llm_provider_combo = ttk.Combobox(
+        llm_frame,
+        textvariable=llm_provider_var,
+        values=["claude", "codex"],
+        state="readonly",
+    )
+    llm_provider_combo.grid(row=1, column=1, sticky="w", pady=4)
+
+    ttk.Label(llm_frame, text="Model LLM").grid(row=2, column=0, sticky="w", pady=4)
+    llm_model_entry = ttk.Entry(llm_frame, textvariable=llm_model_var)
+    llm_model_entry.grid(row=2, column=1, columnspan=2, sticky="ew", pady=4)
+
+    ttk.Label(llm_frame, text="Plik promptu").grid(row=3, column=0, sticky="w", pady=4)
+    llm_prompt_entry = ttk.Entry(llm_frame, textvariable=llm_prompt_var)
+    llm_prompt_entry.grid(row=3, column=1, sticky="ew", padx=(0, 8), pady=4)
+    llm_prompt_button = ttk.Button(llm_frame, text="Wybierz...", command=browse_prompt)
+    llm_prompt_button.grid(row=3, column=2, sticky="ew", pady=4)
+
+    ttk.Label(llm_frame, text="Szablon komendy").grid(row=4, column=0, sticky="w", pady=4)
+    llm_template_entry = ttk.Entry(llm_frame, textvariable=llm_template_var)
+    llm_template_entry.grid(row=4, column=1, columnspan=2, sticky="ew", pady=4)
+
+    start_button = ttk.Button(container, text="Start", command=start_transcription)
+    start_button.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(0, 10))
+
+    ttk.Label(container, text="Log działania").grid(row=8, column=0, columnspan=3, sticky="w", pady=(0, 6))
+    log_text = tk.Text(container, height=18, wrap="word", state="disabled")
+    log_text.grid(row=9, column=0, columnspan=3, sticky="nsew")
+
+    scrollbar = ttk.Scrollbar(container, orient="vertical", command=log_text.yview)
+    scrollbar.grid(row=9, column=3, sticky="ns")
+    log_text.configure(yscrollcommand=scrollbar.set)
+
+    status_label = ttk.Label(container, textvariable=status_var)
+    status_label.grid(row=10, column=0, columnspan=3, sticky="w", pady=(10, 0))
+
+    llm_provider_var.trace_add("write", sync_llm_state)
+    sync_llm_state()
+    root.mainloop()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Transcribe audio files or convert MP4/video to MP3 and transcribe with Whisper"
     )
-    parser.add_argument("input", help="Path to audio/video file (mp3, wav, m4a, mp4, mkv, ...)")
+    parser.add_argument("input", nargs="?", help="Path to audio/video file (mp3, wav, m4a, mp4, mkv, ...)")
     parser.add_argument("-o", "--output", help="Output .txt path (default: same name as input with .txt)")
     parser.add_argument(
         "-m",
@@ -410,7 +720,17 @@ def main() -> None:
             "Available placeholders: {model}, {prompt}, {prompt_file}, {transcript_file}"
         ),
     )
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Launch a simple desktop UI for choosing the file and options",
+    )
     args = parser.parse_args()
+
+    if args.gui or not args.input:
+        launch_gui()
+        return
+
     transcribe(
         input_path=args.input,
         output_path=args.output,
