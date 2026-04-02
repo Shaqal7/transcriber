@@ -56,6 +56,7 @@ Uruchamianie `exe` jest takie samo jak skryptu `.py`, tylko zamiast `python tran
 ./dist/transcriber.exe sciezka/do/pliku.mp3
 ./dist/transcriber.exe sciezka/do/wideo.mp4 -o wynik.txt
 ./dist/transcriber.exe sciezka/do/wideo.mp4 -l pl --keep-converted-audio
+./dist/transcriber.exe .\KSeF.mp4 -o wynik.txt --llm-provider claude --llm-model haiku --llm-prompt-file .\prompt.txt
 ```
 
 Uwaga: wynikowy `exe` nie powinien już próbować doinstalowywać modułów Pythona do własnego wnętrza. Te moduły mają być zbundlowane podczas builda. Przy pierwszym użyciu Whisper nadal może natomiast pobrać sam model, jeśli nie ma go jeszcze w cache użytkownika.
@@ -83,6 +84,12 @@ python transcribe.py plik.mp4 --keep-converted-audio
 
 # Zapis transkrypcji do konkretnego pliku
 python transcribe.py plik.mp3 -o wynik.txt
+
+# Po transkrypcji wyślij wynik do Claude CLI
+python transcribe.py plik.mp4 -o wynik.txt --llm-provider claude --llm-model haiku --llm-prompt-file prompt.txt
+
+# Po transkrypcji wyślij wynik do Codex/GPT CLI przez własny szablon komendy
+python transcribe.py plik.mp4 -o wynik.txt --llm-provider codex --llm-model gpt-5 --llm-prompt-file prompt.txt --llm-command-template "codex -m {model} {prompt}"
 ```
 
 ## Parametry
@@ -95,6 +102,10 @@ python transcribe.py plik.mp3 -o wynik.txt
 | `-l`, `--language` | Kod języka (`pl`, `en`, `de`, ...) | auto-detect |
 | `--yes` | Automatyczna zgoda na doinstalowanie brakujących pakietów | `False` |
 | `--keep-converted-audio` | Zachowuje wygenerowany plik `.mp3` obok pliku wideo | `False` |
+| `--llm-provider` | Po transkrypcji uruchamia wybrane CLI: `claude` lub `codex` | — |
+| `--llm-model` | Model przekazywany do wybranego CLI | — |
+| `--llm-prompt-file` | Plik `.txt` z promptem/instrukcją do połączenia z transkrypcją | — |
+| `--llm-command-template` | Własny szablon komendy dla `codex` z placeholderami | — |
 
 ## Jak działa instalacja zależności
 
@@ -109,6 +120,51 @@ Jeśli chcesz pominąć pytania i od razu zezwolić na instalację braków, uży
 
 ```bash
 python transcribe.py plik.mp4 --yes
+```
+
+## Integracja z Claude CLI i Codex/GPT CLI
+
+Po wygenerowaniu transkrypcji możesz od razu wysłać ją do zewnętrznego CLI.
+Skrypt czyta:
+
+- plik z instrukcją, na przykład `prompt.txt`
+- plik z transkrypcją, na przykład `wynik.txt`
+
+Następnie łączy je w jeden prompt i uruchamia wybrane narzędzie.
+
+### Claude CLI
+
+Przykład:
+
+```powershell
+./dist/transcriber.exe .\KSeF.mp4 -o wynik.txt --llm-provider claude --llm-model haiku --llm-prompt-file .\prompt.txt
+```
+
+To odpowiada mniej więcej komendzie:
+
+```text
+claude --model haiku --print "<prompt z pliku + treść wynik.txt>"
+```
+
+### Codex / GPT CLI
+
+Ponieważ składnia lokalnego `codex` może różnić się między wersjami, dla tego providera podajesz własny szablon komendy:
+
+```powershell
+./dist/transcriber.exe .\KSeF.mp4 -o wynik.txt --llm-provider codex --llm-model gpt-5 --llm-prompt-file .\prompt.txt --llm-command-template "codex -m {model} {prompt}"
+```
+
+Dostępne placeholdery:
+
+- `{model}` - nazwa modelu
+- `{prompt}` - pełny prompt złożony z `prompt.txt` i transkrypcji
+- `{prompt_file}` - ścieżka do pliku z instrukcją
+- `{transcript_file}` - ścieżka do pliku z transkrypcją
+
+Jeśli Twój lokalny CLI woli dostać ścieżki do plików zamiast sklejonego promptu, możesz użyć na przykład:
+
+```text
+codex some-command --instructions {prompt_file} --input {transcript_file}
 ```
 
 ## Format wyjściowy

@@ -28,20 +28,13 @@ function Ensure-Package {
 Ensure-Package -ModuleName "PyInstaller" -PackageName "pyinstaller"
 Ensure-Package -ModuleName "whisper" -PackageName "openai-whisper"
 Ensure-Package -ModuleName "imageio_ffmpeg" -PackageName "imageio-ffmpeg"
+Ensure-Package -ModuleName "tiktoken" -PackageName "tiktoken"
+Ensure-Package -ModuleName "torch" -PackageName "torch"
 
 python -m PyInstaller `
     --clean `
     --noconfirm `
-    --onefile `
-    --name transcriber `
-    --collect-all whisper `
-    --collect-all imageio_ffmpeg `
-    --collect-all tiktoken `
-    --collect-all torch `
-    --hidden-import whisper `
-    --hidden-import whisper.audio `
-    --hidden-import imageio_ffmpeg `
-    transcribe.py
+    .\transcriber.spec
 
 Write-Host ""
-Write-Host "Build zakonczony. Plik EXE znajduje sie w katalogu dist\\transcriber.exe"
+Write-Host "Build zakonczony. Plik EXE znajduje sie w katalogu dist\\transcriber\\transcriber.exe"
