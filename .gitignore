@@ -36,3 +36,4 @@ Thumbs.db
 # Whisper / model caches
 .cache/
 models/
+.transcriber-cache/

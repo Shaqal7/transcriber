@@ -16,66 +16,12 @@ import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
 
-
-if os.environ.get("TRANSCRIBER_EXTERNAL_FALLBACK") == "1" and not getattr(sys, "frozen", False):
-    script_dir = Path(__file__).resolve().parent
-    filtered_sys_path: list[str] = []
-    for entry in sys.path:
-        try:
-            resolved_entry = Path(entry).resolve()
-        except OSError:
-            filtered_sys_path.append(entry)
-            continue
-
-        if resolved_entry == script_dir or resolved_entry == script_dir / "_internal":
-            continue
-
-        filtered_sys_path.append(entry)
-
-    sys.path[:] = filtered_sys_path
-
-
 PYTHON_DEPENDENCIES = {
     "whisper": "openai-whisper",
     "imageio_ffmpeg": "imageio-ffmpeg",
 }
 
 VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov", ".mkv", ".avi", ".webm"}
-_DLL_DIRECTORY_HANDLES: list[object] = []
-
-
-def is_frozen() -> bool:
-    return bool(getattr(sys, "frozen", False))
-
-
-def configure_frozen_dll_search_paths() -> None:
-    if os.name != "nt" or not is_frozen() or not hasattr(os, "add_dll_directory"):
-        return
-
-    base_dir = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent / "_internal"))
-    dll_dirs = [
-        base_dir,
-        base_dir / "torch" / "lib",
-        base_dir / "numpy.libs",
-        base_dir / "llvmlite.libs",
-    ]
-
-    seen: set[str] = set()
-    for dll_dir in dll_dirs:
-        if not dll_dir.exists():
-            continue
-
-        resolved = str(dll_dir.resolve())
-        if resolved in seen:
-            continue
-
-        _DLL_DIRECTORY_HANDLES.append(os.add_dll_directory(resolved))
-        seen.add(resolved)
-
-    current_path = os.environ.get("PATH", "")
-    extra_path = os.pathsep.join(seen)
-    if extra_path:
-        os.environ["PATH"] = f"{extra_path}{os.pathsep}{current_path}" if current_path else extra_path
 
 
 def format_time(seconds: float) -> str:
@@ -115,19 +61,9 @@ def ensure_python_modules(module_names: list[str], auto_confirm: bool) -> None:
             importlib.import_module(module_name)
         except ImportError:
             missing_packages.append(PYTHON_DEPENDENCIES[module_name])
-        except OSError as exc:
-            if is_frozen() and try_run_with_system_python(exc):
-                sys.exit(0)
-            raise
 
     if not missing_packages:
         return
-
-    if is_frozen():
-        print("This EXE is missing bundled runtime modules:")
-        print(", ".join(missing_packages))
-        print("Rebuild the executable with build_exe.ps1 so these packages are bundled inside it.")
-        sys.exit(1)
 
     packages_display = ", ".join(missing_packages)
     if auto_confirm:
@@ -160,96 +96,7 @@ def install_python_packages(packages: list[str]) -> None:
 
 
 def resolve_pip_install_command() -> list[str]:
-    if not is_frozen():
-        return [sys.executable, "-m", "pip", "install"]
-
-    if os.name == "nt":
-        py_launcher = shutil.which("py")
-        if py_launcher:
-            return [py_launcher, "-m", "pip", "install"]
-
-    python_binary = shutil.which("python")
-    if python_binary:
-        return [python_binary, "-m", "pip", "install"]
-
-    print("Could not find a Python interpreter for installing packages.")
-    print("Install Python and pip, or run the non-EXE version of the script.")
-    sys.exit(1)
-
-
-def resolve_python_command() -> list[str]:
-    if not is_frozen():
-        return [sys.executable]
-
-    if os.name == "nt":
-        try:
-            result = subprocess.run(
-                ["where.exe", "python"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except (OSError, subprocess.CalledProcessError):
-            result = None
-        else:
-            for line in result.stdout.splitlines():
-                candidate = line.strip()
-                if candidate and "WindowsApps" not in candidate:
-                    return [candidate]
-
-        py_launcher = shutil.which("py")
-        if py_launcher:
-            return [py_launcher, "-3.13"]
-
-    python_binary = shutil.which("python")
-    if python_binary and "WindowsApps" not in python_binary:
-        return [python_binary]
-
-    pip_command = resolve_pip_install_command()
-    return pip_command[:1]
-
-
-def resolve_bundled_script_path() -> Optional[Path]:
-    candidate_dirs = [
-        Path(getattr(sys, "_MEIPASS", "")),
-        Path(sys.executable).resolve().parent,
-        Path(sys.executable).resolve().parent / "_internal",
-    ]
-
-    for candidate_dir in candidate_dirs:
-        if not str(candidate_dir):
-            continue
-        script_path = candidate_dir / "transcribe.py"
-        if script_path.exists():
-            return script_path
-
-    return None
-
-
-def try_run_with_system_python(import_error: OSError) -> bool:
-    if os.environ.get("TRANSCRIBER_EXTERNAL_FALLBACK") == "1":
-        return False
-
-    script_path = resolve_bundled_script_path()
-    if script_path is None:
-        return False
-
-    python_command = resolve_python_command()
-    command = [*python_command, str(script_path), *sys.argv[1:]]
-    env = os.environ.copy()
-    env["TRANSCRIBER_EXTERNAL_FALLBACK"] = "1"
-    env.pop("PYTHONHOME", None)
-    env.pop("PYTHONPATH", None)
-    for key in list(env):
-        if key.startswith("_PYI_") or key.startswith("PYINSTALLER_"):
-            env.pop(key, None)
-
-    print("Bundled Whisper runtime failed to start.")
-    print(str(import_error))
-    print("Falling back to the local Python environment...")
-
-    completed = subprocess.run(command, env=env)
-    sys.exit(completed.returncode)
+    return [sys.executable, "-m", "pip", "install"]
 
 
 def ensure_ffmpeg(auto_confirm: bool) -> Path:
@@ -515,8 +362,6 @@ def transcribe(
 
 
 def main() -> None:
-    configure_frozen_dll_search_paths()
-
     parser = argparse.ArgumentParser(
         description="Transcribe audio files or convert MP4/video to MP3 and transcribe with Whisper"
     )
