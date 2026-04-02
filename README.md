@@ -101,7 +101,7 @@ py -3.13 .\transcribe.py .\KSeF.mp4 -o wynik.txt --llm-provider codex --llm-mode
 | `--llm-provider` | Po transkrypcji uruchamia wybrane CLI: `claude` lub `codex` | — |
 | `--llm-model` | Model przekazywany do wybranego CLI | — |
 | `--llm-prompt-file` | Plik `.txt` z promptem/instrukcją do połączenia z transkrypcją | — |
-| `--llm-command-template` | Własny szablon komendy dla `codex` z placeholderami | — |
+| `--llm-command-template` | Własny szablon komendy dla wybranego providera LLM z placeholderami | — |
 | `--gui` | Uruchamia proste okno desktopowe do wyboru pliku i opcji | `False` |
 
 ## Jak działa skrypt
@@ -134,6 +134,12 @@ Claude CLI:
 
 ```powershell
 py -3.13 .\transcribe.py .\KSeF.mp4 -o wynik.txt --llm-provider claude --llm-model haiku --llm-prompt-file .\prompt.txt
+```
+
+Jeśli na Windows `claude` działa u Ciebie tylko przez `cmd`, możesz też jawnie podać szablon:
+
+```powershell
+py -3.13 .\transcribe.py .\KSeF.mp4 -o wynik.txt --llm-provider claude --llm-model haiku --llm-prompt-file .\prompt.txt --llm-command-template "cmd /c claude --model {model} --print {prompt}"
 ```
 
 Codex CLI:

@@ -231,6 +231,16 @@ def resolve_llm_command(
     transcript_file: Path,
     command_template: Optional[str],
 ) -> list[str]:
+    if command_template:
+        safe_model = model or ""
+        expanded = command_template.format(
+            model=safe_model,
+            prompt=full_prompt,
+            prompt_file=str(prompt_file),
+            transcript_file=str(transcript_file),
+        )
+        return split_command_template(expanded)
+
     if provider == "claude":
         command = ["claude"]
         if model:
@@ -238,21 +248,11 @@ def resolve_llm_command(
         command.extend(["--print", full_prompt])
         return command
 
-    if not command_template:
-        print(
-            "Error: provider 'codex' requires --llm-command-template so the app knows how to call your local Codex CLI."
-        )
-        print("Use placeholders like {model}, {prompt}, {prompt_file}, {transcript_file}.")
-        sys.exit(1)
-
-    safe_model = model or ""
-    expanded = command_template.format(
-        model=safe_model,
-        prompt=full_prompt,
-        prompt_file=str(prompt_file),
-        transcript_file=str(transcript_file),
+    print(
+        "Error: provider 'codex' requires --llm-command-template so the app knows how to call your local Codex CLI."
     )
-    return split_command_template(expanded)
+    print("Use placeholders like {model}, {prompt}, {prompt_file}, {transcript_file}.")
+    sys.exit(1)
 
 
 def run_llm_command(
@@ -276,8 +276,22 @@ def run_llm_command(
     try:
         subprocess.run(command, check=True)
     except FileNotFoundError:
+        if os.name == "nt":
+            shell_command = ["cmd", "/c", *command]
+            print("Direct command was not found. Retrying through cmd.exe...")
+            try:
+                subprocess.run(shell_command, check=True)
+                return
+            except FileNotFoundError:
+                pass
+            except subprocess.CalledProcessError as exc:
+                print(f"LLM command failed with exit code {exc.returncode}.")
+                sys.exit(exc.returncode or 1)
+
         print(f"Error: could not find CLI command for provider '{provider}'.")
         print(f"Attempted command: {' '.join(command[:3])}")
+        if os.name == "nt":
+            print("If the command works only through cmd.exe, pass it explicitly via --llm-command-template.")
         sys.exit(1)
     except subprocess.CalledProcessError as exc:
         print(f"LLM command failed with exit code {exc.returncode}.")
@@ -716,7 +730,7 @@ def main() -> None:
     parser.add_argument(
         "--llm-command-template",
         help=(
-            "Custom command template used for provider 'codex'. "
+            "Custom command template used for the selected LLM provider. "
             "Available placeholders: {model}, {prompt}, {prompt_file}, {transcript_file}"
         ),
     )
