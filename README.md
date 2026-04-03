@@ -129,6 +129,7 @@ Skrypt czyta:
 - plik z transkrypcją, na przykład `wynik.txt`
 
 Następnie łączy je w jeden prompt i uruchamia wybrane narzędzie.
+Odpowiedź LLM jest zapisywana do pliku Markdown obok transkrypcji, na przykład `wynik.txt` -> `wynik.md`.
 
 Claude CLI:
 

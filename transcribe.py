@@ -223,6 +223,10 @@ def split_command_template(command_template: str) -> list[str]:
     return shlex.split(command_template, posix=os.name != "nt")
 
 
+def resolve_llm_output_path(transcript_file: Path) -> Path:
+    return transcript_file.with_suffix(".md")
+
+
 def resolve_llm_command(
     provider: str,
     model: Optional[str],
@@ -261,7 +265,7 @@ def run_llm_command(
     prompt_file: Path,
     transcript_file: Path,
     command_template: Optional[str],
-) -> None:
+) -> Path:
     full_prompt = build_llm_prompt(prompt_file=prompt_file, transcript_file=transcript_file)
     command = resolve_llm_command(
         provider=provider,
@@ -271,22 +275,45 @@ def run_llm_command(
         transcript_file=transcript_file,
         command_template=command_template,
     )
+    llm_output_path = resolve_llm_output_path(transcript_file)
 
     print(f"Running {provider} CLI...")
     try:
-        subprocess.run(command, check=True)
+        completed = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
     except FileNotFoundError:
         if os.name == "nt":
             shell_command = ["cmd", "/c", *command]
             print("Direct command was not found. Retrying through cmd.exe...")
             try:
-                subprocess.run(shell_command, check=True)
-                return
+                completed = subprocess.run(
+                    shell_command,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
             except FileNotFoundError:
                 pass
             except subprocess.CalledProcessError as exc:
                 print(f"LLM command failed with exit code {exc.returncode}.")
+                if exc.stdout:
+                    print(exc.stdout.strip())
+                if exc.stderr:
+                    print(exc.stderr.strip())
                 sys.exit(exc.returncode or 1)
+            else:
+                response_text = completed.stdout.strip()
+                llm_output_path.write_text(response_text + "\n", encoding="utf-8")
+                print(f"Saved LLM result to: {llm_output_path}")
+                return llm_output_path
 
         print(f"Error: could not find CLI command for provider '{provider}'.")
         print(f"Attempted command: {' '.join(command[:3])}")
@@ -295,7 +322,20 @@ def run_llm_command(
         sys.exit(1)
     except subprocess.CalledProcessError as exc:
         print(f"LLM command failed with exit code {exc.returncode}.")
+        if exc.stdout:
+            print(exc.stdout.strip())
+        if exc.stderr:
+            print(exc.stderr.strip())
         sys.exit(exc.returncode or 1)
+
+    response_text = completed.stdout.strip()
+    if not response_text:
+        print("LLM command completed, but returned no stdout to save.")
+        sys.exit(1)
+
+    llm_output_path.write_text(response_text + "\n", encoding="utf-8")
+    print(f"Saved LLM result to: {llm_output_path}")
+    return llm_output_path
 
 
 def transcribe(
